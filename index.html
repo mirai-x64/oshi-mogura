@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>押しモグラ</title>
+<style>
+  html,body{margin:0;height:100%;background:#1b1d1a;display:flex;align-items:center;
+    justify-content:center;font-family:system-ui,sans-serif;color:#cfd3c8;}
+  canvas{touch-action:none;image-rendering:pixelated;}
+</style>
+</head>
+<body>
+<canvas id="cv" width="360" height="440"></canvas>
+<script>
+const N = 4;
+const cv = document.getElementById('cv'), g = cv.getContext('2d');
+
+const OX = 40, OY = 90, PITCH = 70, HOLE_R = 26, MOLE_R = 19;
+
+// --- 盤の状態 ---------------------------------------------------------
+let cells = new Array(N*N).fill(false); // モグラの有無
+let flying = null;   // {from,to,kind,t}  kind: 'move'|'bounce'|'pop'
+let pops = [];       // 消滅演出
+let over = false;
+let spawnAt = 0;
+const SPAWN_MS = 2600;
+const FLY_MS = 190;
+
+function cx(i){ return OX + (i % N) * PITCH + HOLE_R; }
+function cy(i){ return OY + ((i / N) | 0) * PITCH + HOLE_R; }
+
+function neighbor(i, dir){
+  const x = i % N, y = (i / N) | 0;
+  const nx = x + [0, 1, 0, -1][dir], ny = y + [-1, 0, 1, 0][dir];
+  if (nx < 0 || nx >= N || ny < 0 || ny >= N) return -1;
+  return ny * N + nx;
+}
+
+// クリック点から見て「反対側」へ飛ぶ
+function dirFromOffset(dx, dy){
+  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 3 : 1;
+  return dy > 0 ? 0 : 2;
+}
+
+// 穴 i のモグラを dir へ弾く。盤面への反映は着地時に行う。
+function poke(i, dir){
+  if (over || flying || !cells[i]) return null;
+  const j = neighbor(i, dir);
+  const kind = j < 0 ? 'bounce' : (cells[j] ? 'pop' : 'move');
+  cells[i] = false;                       // 飛び立つ
+  flying = { from: i, to: j, dir, kind, t: 0 };
+  return kind;
+}
+
+function land(){
+  const f = flying; flying = null;
+  if (f.kind === 'bounce') cells[f.from] = true;        // 壁に当たって元の穴へ
+  else if (f.kind === 'move') cells[f.to] = true;
+  else { cells[f.to] = false; pops.push({ i: f.to, t: 0 }); } // 2匹とも弾ける
+  if (cells.every(Boolean)) over = true;
+}
+
+function spawn(){
+  const empty = [];
+  for (let i = 0; i < cells.length; i++) if (!cells[i] && !(flying && flying.from === i)) empty.push(i);
+  if (!empty.length) return;
+  cells[empty[(Math.random() * empty.length) | 0]] = true;
+  if (cells.every(Boolean)) over = true;
+}
+
+cv.addEventListener('pointerdown', e => {
+  const r = cv.getBoundingClientRect();
+  const mx = (e.clientX - r.left) * cv.width / r.width;
+  const my = (e.clientY - r.top) * cv.height / r.height;
+  for (let i = 0; i < cells.length; i++){
+    const dx = mx - cx(i), dy = my - cy(i);
+    if (dx*dx + dy*dy <= HOLE_R * HOLE_R){ poke(i, dirFromOffset(dx, dy)); return; }
+  }
+});
+
+// --- 描画 -------------------------------------------------------------
+function drawMole(x, y, r){
+  g.fillStyle = '#3c4a33';
+  g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  g.fillStyle = '#cfd3c8';
+  g.beginPath(); g.arc(x - r*0.32, y - r*0.15, r*0.15, 0, 7); g.fill();
+  g.beginPath(); g.arc(x + r*0.32, y - r*0.15, r*0.15, 0, 7); g.fill();
+}
+
+function frame(now){
+  requestAnimationFrame(frame);
+  if (!spawnAt) spawnAt = now;
+  if (!over && !flying && now - spawnAt >= SPAWN_MS){ spawn(); spawnAt = now; }
+
+  if (flying){
+    flying.t += 16;
+    if (flying.t >= FLY_MS) land();
+  }
+  pops = pops.filter(p => (p.t += 16) < 260);
+
+  g.fillStyle = '#1b1d1a'; g.fillRect(0, 0, cv.width, cv.height);
+  g.fillStyle = '#cfd3c8'; g.font = '16px system-ui';
+  g.fillText('押しモグラ', OX, 40);
+
+  for (let i = 0; i < cells.length; i++){
+    g.fillStyle = '#111';
+    g.beginPath(); g.ellipse(cx(i), cy(i), HOLE_R, HOLE_R * 0.62, 0, 0, 7); g.fill();
+    if (cells[i]) drawMole(cx(i), cy(i), MOLE_R);
+  }
+
+  if (flying){
+    const f = flying, u = Math.min(1, f.t / FLY_MS);
+    let x, y;
+    if (f.kind === 'bounce'){
+      // 壁へ向かって出て、跳ね返って戻る
+      const b = Math.sin(u * Math.PI) * PITCH * 0.42;
+      x = cx(f.from) + [0, 1, 0, -1][f.dir] * b;
+      y = cy(f.from) + [-1, 0, 1, 0][f.dir] * b;
+    } else {
+      x = cx(f.from) + (cx(f.to) - cx(f.from)) * u;
+      y = cy(f.from) + (cy(f.to) - cy(f.from)) * u;
+    }
+    drawMole(x, y - Math.sin(u * Math.PI) * 22, MOLE_R);
+  }
+
+  for (const p of pops){
+    const u = p.t / 260;
+    g.strokeStyle = `rgba(207,211,200,${1 - u})`; g.lineWidth = 2;
+    for (let k = 0; k < 6; k++){
+      const a = k * Math.PI / 3, d = 10 + u * 30;
+      g.beginPath();
+      g.moveTo(cx(p.i) + Math.cos(a) * d, cy(p.i) + Math.sin(a) * d);
+      g.lineTo(cx(p.i) + Math.cos(a) * (d + 8), cy(p.i) + Math.sin(a) * (d + 8));
+      g.stroke();
+    }
+  }
+
+  if (over){
+    g.fillStyle = '#cfd3c8'; g.font = '28px system-ui'; g.textAlign = 'center';
+    g.fillText('終了', cv.width / 2, OY + PITCH * 2 + 10);
+    g.textAlign = 'left';
+  }
+}
+requestAnimationFrame(frame);
+
+// 検証用フック
+window.__game = {
+  get cells(){ return cells.slice(); },
+  get over(){ return over; },
+  get busy(){ return !!flying; },
+  poke, dirFromOffset, neighbor,
+  set(list){ cells = new Array(N*N).fill(false); for (const i of list) cells[i] = true;
+             over = false; flying = null; pops = []; },
+  freeze(){ spawnAt = Infinity; },
+};
+</script>
+</body>
+</html>
