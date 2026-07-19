@@ -22,6 +22,7 @@ const OX = 40, OY = 90, PITCH = 70, HOLE_R = 26, MOLE_R = 19;
 let cells = new Array(N*N).fill(false); // モグラの有無
 let flying = null;   // {from,to,kind,t}  kind: 'move'|'bounce'|'pop'
 let pops = [];       // 消滅演出
+let taps = [];       // 叩いた位置(どちら側を叩いたか目で追えるように)
 let over = false;
 let spawnAt = 0;
 const SPAWN_MS = 2600;
@@ -75,7 +76,10 @@ cv.addEventListener('pointerdown', e => {
   const my = (e.clientY - r.top) * cv.height / r.height;
   for (let i = 0; i < cells.length; i++){
     const dx = mx - cx(i), dy = my - cy(i);
-    if (dx*dx + dy*dy <= HOLE_R * HOLE_R){ poke(i, dirFromOffset(dx, dy)); return; }
+    if (dx*dx + dy*dy <= HOLE_R * HOLE_R){
+      if (poke(i, dirFromOffset(dx, dy))) taps.push({ x: mx, y: my, t: 0 });
+      return;
+    }
   }
 });
 
@@ -98,14 +102,15 @@ function frame(now){
     if (flying.t >= FLY_MS) land();
   }
   pops = pops.filter(p => (p.t += 16) < 260);
+  taps = taps.filter(p => (p.t += 16) < 220);
 
   g.fillStyle = '#1b1d1a'; g.fillRect(0, 0, cv.width, cv.height);
   g.fillStyle = '#cfd3c8'; g.font = '16px system-ui';
   g.fillText('押しモグラ', OX, 40);
 
   for (let i = 0; i < cells.length; i++){
-    g.fillStyle = '#111';
-    g.beginPath(); g.ellipse(cx(i), cy(i), HOLE_R, HOLE_R * 0.62, 0, 0, 7); g.fill();
+    g.fillStyle = '#111'; g.strokeStyle = '#2e332b'; g.lineWidth = 2;
+    g.beginPath(); g.ellipse(cx(i), cy(i), HOLE_R, HOLE_R * 0.62, 0, 0, 7); g.fill(); g.stroke();
     if (cells[i]) drawMole(cx(i), cy(i), MOLE_R);
   }
 
@@ -136,6 +141,12 @@ function frame(now){
     }
   }
 
+  for (const p of taps){
+    const u = p.t / 220;
+    g.strokeStyle = `rgba(207,211,200,${0.9 - u})`; g.lineWidth = 2;
+    g.beginPath(); g.arc(p.x, p.y, 4 + u * 12, 0, 7); g.stroke();
+  }
+
   if (over){
     g.fillStyle = '#cfd3c8'; g.font = '28px system-ui'; g.textAlign = 'center';
     g.fillText('終了', cv.width / 2, OY + PITCH * 2 + 10);
@@ -151,7 +162,7 @@ window.__game = {
   get busy(){ return !!flying; },
   poke, dirFromOffset, neighbor,
   set(list){ cells = new Array(N*N).fill(false); for (const i of list) cells[i] = true;
-             over = false; flying = null; pops = []; },
+             over = false; flying = null; pops = []; spawnAt = 0; },
   freeze(){ spawnAt = Infinity; },
 };
 </script>
